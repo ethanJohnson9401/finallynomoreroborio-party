@@ -6,6 +6,7 @@ import TerminationNotice from "@/components/TerminationNotice";
 import SystemcoreReveal from "@/components/SystemcoreReveal";
 import Footer from "@/components/Footer";
 import ScrollReveal from "@/components/ScrollReveal";
+import TraumaCenter from "@/components/TraumaCenter";
 
 export default function Home(){
   return (
@@ -18,6 +19,7 @@ export default function Home(){
           <CelebrationControls />
           <ScrollReveal><TerminationNotice/></ScrollReveal>
           <ScrollReveal><SystemcoreReveal /></ScrollReveal>
+          <TraumaCenter />
           <Footer />
       </main>
 

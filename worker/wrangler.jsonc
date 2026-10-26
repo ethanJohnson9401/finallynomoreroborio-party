@@ -1,0 +1,30 @@
+
+/**
+ * Cloudflare Worker configuration
+ * finallynomoreroborio.party
+ */
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "worker",
+	"main": "src/index.ts",
+	"compatibility_date": "2026-10-19",
+
+	"observability": {
+		"enabled": true
+	},
+
+	"upload_source_maps": true,
+
+	/**
+	 * Cloudflare D1 Database
+	 * Stores anonymous roboRIO incident reports.
+	 */
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "roborio-trauma-db",
+			"database_id": "276e3d2b-dee8-40b0-a5b0-585231effff3",
+			"migrations_dir": "migrations"
+		}
+	]
+}
