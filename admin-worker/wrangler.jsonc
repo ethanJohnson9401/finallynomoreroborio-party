@@ -40,7 +40,7 @@
       ],
 
       "vars": {
-        "ADMIN_API_ENABLED": "false",
+        "ADMIN_API_ENABLED": "true",
         "ADMIN_QUEUE_ENABLED": "true"
       },
 

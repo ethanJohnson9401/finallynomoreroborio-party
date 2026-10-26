@@ -1,6 +1,6 @@
 
 import {
-    getPendingIncidents,
+    getPendingIncidentPage,
     reviewIncident,
     type ReviewDecision,
 } from "./db/incidents";
@@ -31,7 +31,7 @@ const UUID_PATTERN =
     /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
- * Standard JSON response.
+ * Generate a JSON API response.
  */
 function jsonResponse(
     body: unknown,
@@ -47,8 +47,8 @@ function jsonResponse(
 }
 
 /**
- * Attach credentialed CORS headers only for the
- * trusted dashboard origin.
+ * Attach credentialed CORS headers only
+ * for the trusted admin dashboard origin.
  */
 function reviewResponse(
     request: Request,
@@ -71,9 +71,9 @@ function reviewResponse(
 }
 
 /**
- * Credentialed CORS response for read-only endpoints.
+ * Authenticated read-only response.
  *
- * CORS does not replace authentication.
+ * CORS does not grant authorization.
  */
 function readResponse(
     request: Request,
@@ -102,10 +102,13 @@ function readResponse(
         );
     }
 
-    return new Response(JSON.stringify(body), {
-        status,
-        headers,
-    });
+    return new Response(
+        JSON.stringify(body),
+        {
+            status,
+            headers,
+        }
+    );
 }
 
 /**
@@ -119,15 +122,16 @@ function methodNotAllowed(
         405
     );
 
-    response.headers.set("Allow", allowed);
+    response.headers.set(
+        "Allow",
+        allowed
+    );
 
     return response;
 }
 
 /**
- * Process a browser preflight for the review API.
- *
- * No incident data is read or changed here.
+ * CORS preflight for review mutations.
  */
 function reviewPreflight(
     request: Request
@@ -170,7 +174,7 @@ function reviewPreflight(
 }
 
 /**
- * Verify production feature switches.
+ * Runtime feature switches.
  */
 function isQueueEnabled(env: Env): boolean {
     return env.ADMIN_QUEUE_ENABLED === "true";
@@ -180,7 +184,7 @@ function areReviewsEnabled(env: Env): boolean {
     return env.ADMIN_API_ENABLED === "true";
 }
 
-export default {
+const adminWorker = {
     async fetch(
         request: Request,
         env: Env,
@@ -191,8 +195,6 @@ export default {
 
         /**
          * GET /api/health
-         *
-         * No incident data is exposed.
          */
         if (pathname === "/api/health") {
             if (request.method !== "GET") {
@@ -208,7 +210,7 @@ export default {
         /**
          * GET /api/admin/incidents
          *
-         * Moderator-only, read-only pending queue.
+         * Authenticated, paginated moderation queue.
          */
         if (pathname === QUEUE_PATH) {
             if (request.method !== "GET") {
@@ -223,6 +225,10 @@ export default {
                 );
             }
 
+            /**
+             * Verify Cloudflare Access identity
+             * and the moderator allowlist.
+             */
             const auth = await authorizeModerator(
                 { access: ctx?.access },
                 env
@@ -238,16 +244,61 @@ export default {
                 );
             }
 
+            /**
+             * Validate query parameters.
+             */
+            const rawCursor =
+                url.searchParams.get("cursor");
+
+            const rawLimit =
+                url.searchParams.get("limit");
+
+            if (
+                rawLimit !== null &&
+                !/^(?:[1-9]|[1-4][0-9]|50)$/.test(
+                    rawLimit
+                )
+            ) {
+                return readResponse(
+                    request,
+                    { error: "INVALID_LIMIT" },
+                    400
+                );
+            }
+
+            const limit =
+                rawLimit === null
+                    ? 25
+                    : Number(rawLimit);
+
             try {
-                const incidents =
-                    await getPendingIncidents(env.DB);
+                const page =
+                    await getPendingIncidentPage(
+                        env.DB,
+                        rawCursor,
+                        limit
+                    );
 
                 return readResponse(request, {
                     status: "ok",
-                    incidents,
-                    count: incidents.length,
+                    incidents: page.incidents,
+                    count: page.incidents.length,
+                    total: page.total,
+                    nextCursor: page.nextCursor,
                 });
             } catch (error) {
+                if (
+                    error instanceof RangeError &&
+                    error.message ===
+                    "INVALID_CURSOR"
+                ) {
+                    return readResponse(
+                        request,
+                        { error: "INVALID_CURSOR" },
+                        400
+                    );
+                }
+
                 console.error(
                     "Moderation queue query failed:",
                     error
@@ -275,9 +326,7 @@ export default {
 
         if (reviewMatch) {
             /**
-             * Handle CORS preflight before authentication.
-             * Cloudflare Access may also need separate
-             * preflight configuration.
+             * Handle CORS preflight.
              */
             if (request.method === "OPTIONS") {
                 return reviewPreflight(request);
@@ -291,9 +340,6 @@ export default {
 
             /**
              * Origin-based CSRF protection.
-             *
-             * Reject absent, foreign, or forged-looking
-             * browser Origin values.
              */
             if (!isTrustedWriteOrigin(request)) {
                 return jsonResponse(
@@ -303,7 +349,7 @@ export default {
             }
 
             /**
-             * Production kill switch.
+             * Production write kill switch.
              */
             if (!areReviewsEnabled(env)) {
                 return reviewResponse(
@@ -327,8 +373,8 @@ export default {
             /**
              * Authenticate through Cloudflare Access.
              *
-             * Never trust moderator email headers
-             * or user-submitted email fields.
+             * Never trust arbitrary email headers
+             * or email addresses in request bodies.
              */
             const auth = await authorizeModerator(
                 { access: ctx?.access },
@@ -352,8 +398,8 @@ export default {
 
             try {
                 /**
-                 * This function performs the conditional
-                 * update and audit insertion atomically.
+                 * Conditional database update and
+                 * audit record insertion are atomic.
                  */
                 const result = await reviewIncident(
                     env.DB,
@@ -408,3 +454,5 @@ export default {
         );
     },
 };
+
+export default adminWorker;

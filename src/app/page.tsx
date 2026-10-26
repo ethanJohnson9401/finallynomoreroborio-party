@@ -1,4 +1,5 @@
-import Header from "@/components/Header"
+
+import Header from "@/components/Header";
 import Hero from "@/components/Hero";
 import Countdown from "@/components/Countdown";
 import CelebrationControls from "@/components/CelebrationControls";
@@ -7,21 +8,32 @@ import SystemcoreReveal from "@/components/SystemcoreReveal";
 import Footer from "@/components/Footer";
 import ScrollReveal from "@/components/ScrollReveal";
 import TraumaCenter from "@/components/TraumaCenter";
+import IncidentMemorialWall from "@/components/IncidentMemorialWall";
 
-export default function Home(){
-  return (
+export default function Home() {
+    return (
+        <main className="min-h-screen px-8 py-12">
+            <Header />
 
-      <main className="min-h-screen px-8 py-12">
+            <Hero />
 
-          <Header />
-          <Hero />
-          <Countdown />
-          <CelebrationControls />
-          <ScrollReveal><TerminationNotice/></ScrollReveal>
-          <ScrollReveal><SystemcoreReveal /></ScrollReveal>
-          <TraumaCenter />
-          <Footer />
-      </main>
+            <Countdown />
 
-  )
+            <CelebrationControls />
+
+            <ScrollReveal>
+                <TerminationNotice />
+            </ScrollReveal>
+
+            <ScrollReveal>
+                <SystemcoreReveal />
+            </ScrollReveal>
+
+            <TraumaCenter />
+
+            <IncidentMemorialWall />
+
+            <Footer />
+        </main>
+    );
 }

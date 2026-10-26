@@ -2,7 +2,12 @@
 /**
  * Private roboRIO Trauma Center database operations.
  *
- * All review decisions must be audited atomically.
+ * Features:
+ * - Cursor-based pending incident pagination
+ * - Accurate total pending incident count
+ * - Atomic approval/rejection
+ * - Moderation audit trail
+ * - Double-review protection
  */
 
 export interface PendingIncident {
@@ -33,8 +38,222 @@ export type ReviewResult =
     outcome: "already_reviewed";
 };
 
+interface QueueCursor {
+    created_at: string;
+    id: string;
+}
+
+export interface PendingIncidentPage {
+    incidents: PendingIncident[];
+    total: number;
+    nextCursor: string | null;
+}
+
+const DEFAULT_PAGE_SIZE = 25;
+const MAX_PAGE_SIZE = 50;
+
+const UUID_PATTERN =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const TIMESTAMP_PATTERN =
+    /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
+
 /**
- * Retrieve the pending incident queue.
+ * Encode the position of the last incident
+ * on a page into an opaque URL-safe cursor.
+ */
+function encodeQueueCursor(
+    incident: PendingIncident
+): string {
+    const cursor: QueueCursor = {
+        created_at: incident.created_at,
+        id: incident.id,
+    };
+
+    return btoa(JSON.stringify(cursor))
+        .replace(/\+/g, "-")
+        .replace(/\//g, "_")
+        .replace(/=+$/, "");
+}
+
+/**
+ * Validate and decode a pagination cursor.
+ *
+ * Reject malformed, oversized, or structurally
+ * invalid cursors.
+ */
+function decodeQueueCursor(
+    value: string
+): QueueCursor | null {
+    try {
+        if (
+            value.length > 256 ||
+            !/^[A-Za-z0-9_-]+$/.test(value)
+        ) {
+            return null;
+        }
+
+        const normalized = value
+            .replace(/-/g, "+")
+            .replace(/_/g, "/");
+
+        const parsed: unknown = JSON.parse(
+            atob(normalized)
+        );
+
+        if (
+            !parsed ||
+            typeof parsed !== "object"
+        ) {
+            return null;
+        }
+
+        const cursor = parsed as Partial<QueueCursor>;
+
+        if (
+            typeof cursor.created_at !== "string" ||
+            !TIMESTAMP_PATTERN.test(cursor.created_at) ||
+            typeof cursor.id !== "string" ||
+            !UUID_PATTERN.test(cursor.id)
+        ) {
+            return null;
+        }
+
+        return {
+            created_at: cursor.created_at,
+            id: cursor.id,
+        };
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Retrieve one page of pending incidents.
+ *
+ * Uses keyset pagination ordered by:
+ *
+ * 1. created_at DESC
+ * 2. id DESC
+ *
+ * The total is the number of pending reports
+ * across the entire moderation queue.
+ */
+export async function getPendingIncidentPage(
+    db: D1Database,
+    cursorValue: string | null = null,
+    limit = DEFAULT_PAGE_SIZE
+): Promise<PendingIncidentPage> {
+    if (
+        !Number.isInteger(limit) ||
+        limit < 1 ||
+        limit > MAX_PAGE_SIZE
+    ) {
+        throw new RangeError("INVALID_LIMIT");
+    }
+
+    const cursor =
+        cursorValue === null
+            ? null
+            : decodeQueueCursor(cursorValue);
+
+    if (cursorValue !== null && !cursor) {
+        throw new RangeError("INVALID_CURSOR");
+    }
+
+    const cursorCondition = cursor
+        ? `
+          AND (
+              created_at < ?
+              OR (
+                  created_at = ?
+                  AND id < ?
+              )
+          )
+        `
+        : "";
+
+    const statement = db.prepare(`
+        SELECT
+            id,
+            story,
+            status,
+            created_at
+        FROM incidents
+        WHERE status = 'pending'
+        ${cursorCondition}
+        ORDER BY created_at DESC, id DESC
+        LIMIT ?
+    `);
+
+    const pageQuery = cursor
+        ? statement.bind(
+            cursor.created_at,
+            cursor.created_at,
+            cursor.id,
+            limit + 1
+        )
+        : statement.bind(limit + 1);
+
+    const countQuery = db.prepare(`
+        SELECT COUNT(*) AS total
+        FROM incidents
+        WHERE status = 'pending'
+    `);
+
+    const results = await db.batch([
+        pageQuery,
+        countQuery,
+    ]);
+
+    const pageResult = results[0];
+    const countResult = results[1];
+
+    if (
+        !pageResult.success ||
+        !countResult.success
+    ) {
+        throw new Error(
+            "Failed to retrieve moderation queue"
+        );
+    }
+
+    const rows =
+        pageResult.results as unknown as PendingIncident[];
+
+    const totalRow =
+        countResult.results[0] as
+            | { total: number }
+            | undefined;
+
+    if (!totalRow) {
+        throw new Error(
+            "Pending incident count unavailable"
+        );
+    }
+
+    const incidents = rows.slice(0, limit);
+    const hasMore = rows.length > limit;
+
+    const lastIncident = incidents.at(-1);
+
+    return {
+        incidents,
+        total: totalRow.total,
+        nextCursor:
+            hasMore && lastIncident
+                ? encodeQueueCursor(lastIncident)
+                : null,
+    };
+}
+
+/**
+ * Legacy convenience function.
+ *
+ * Retained for compatibility with any existing
+ * internal callers that need the first N reports.
+ *
+ * New API code should use getPendingIncidentPage().
  */
 export async function getPendingIncidents(
     db: D1Database,
@@ -51,7 +270,7 @@ export async function getPendingIncidents(
              FROM incidents
              WHERE status = 'pending'
              ORDER BY created_at DESC, id DESC
-                 LIMIT ?`
+             LIMIT ?`
         )
         .bind(safeLimit)
         .all<PendingIncident>();
@@ -66,17 +285,21 @@ export async function getPendingIncidents(
 }
 
 /**
- * Review exactly once and record the verified moderator.
+ * Review exactly one pending incident.
  *
- * Both statements execute inside one D1 transaction.
+ * Both statements run atomically in a D1 batch.
  *
- * Statement 1 changes only pending incidents.
+ * Statement 1:
+ * - Updates pending -> approved/rejected
+ * - Records review timestamp
+ * - Records publication timestamp only on approval
  *
- * Statement 2 creates an audit row only if Statement 1
- * changed exactly one incident. SQLite changes()
- * reflects the preceding UPDATE in this batch.
+ * Statement 2:
+ * - Inserts the moderator audit record
+ * - Executes only when the previous UPDATE
+ *   changed exactly one incident
  *
- * If audit insertion fails, the entire batch rolls back.
+ * If a statement fails, D1 rolls back the batch.
  */
 export async function reviewIncident(
     db: D1Database,
@@ -87,7 +310,9 @@ export async function reviewIncident(
     const email = moderatorEmail.trim().toLowerCase();
 
     if (!email) {
-        throw new Error("Verified moderator email required");
+        throw new Error(
+            "Verified moderator email required"
+        );
     }
 
     const auditId = crypto.randomUUID();
@@ -140,8 +365,10 @@ export async function reviewIncident(
             decision
         );
 
-    // D1 guarantees batch statements execute
-    // sequentially as a transaction.
+    /**
+     * D1 executes all batch statements in a
+     * single transaction.
+     */
     const results = await db.batch([
         updateStatement,
         auditStatement,
@@ -150,8 +377,13 @@ export async function reviewIncident(
     const update = results[0];
     const audit = results[1];
 
-    if (!update.success || !audit.success) {
-        throw new Error("Review transaction failed");
+    if (
+        !update.success ||
+        !audit.success
+    ) {
+        throw new Error(
+            "Review transaction failed"
+        );
     }
 
     const incident = (
@@ -159,7 +391,10 @@ export async function reviewIncident(
     )[0];
 
     if (incident) {
-        // A successful review must have a matching audit.
+        /**
+         * The review and its audit record
+         * must have changed exactly one row each.
+         */
         if (
             update.meta.changes !== 1 ||
             audit.meta.changes !== 1
@@ -175,7 +410,11 @@ export async function reviewIncident(
         };
     }
 
-    // Neither the incident nor audit should change.
+    /**
+     * No review occurred.
+     *
+     * Ensure there were no unexpected writes.
+     */
     if (
         update.meta.changes !== 0 ||
         audit.meta.changes !== 0
@@ -186,8 +425,8 @@ export async function reviewIncident(
     }
 
     /**
-     * Distinguish nonexistent incidents from incidents
-     * that have already been reviewed.
+     * Distinguish an unknown incident from one
+     * that has already been reviewed.
      */
     const existing = await db
         .prepare(
