@@ -4,6 +4,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import styles from "./page.module.css";
+import IncidentArchive from "../components/IncidentArchive";
 
 const API_URL = "https://admin-api.finallynomoreroborio.party";
 const PAGE_SIZE = 25;
@@ -697,15 +698,14 @@ export default function Home() {
                             </span>
               </Link>
 
-              <span
-                  className={
-                    styles.inactiveNav
-                  }
+              <a
+                  href="#incident-archive"
+                  className={styles.inactiveNav}
               >
-                            <span>02</span>
-                            Incident archive
-                            <small>SOON</small>
-                        </span>
+                <span>02</span>
+                Incident archive
+                <span aria-hidden="true">↗</span>
+              </a>
 
               <span
                   className={
@@ -1477,6 +1477,8 @@ export default function Home() {
                             </span>
               </div>
             </section>
+
+            <IncidentArchive />
 
             <footer
                 className={styles.footer}

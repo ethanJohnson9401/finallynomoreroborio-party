@@ -447,3 +447,149 @@ export async function reviewIncident(
         outcome: "already_reviewed",
     };
 }
+
+
+/**
+ * Moderator-controlled incident withdrawal.
+ *
+ * Withdrawals remove an approved report from public
+ * visibility without permanently deleting its contents.
+ */
+
+export interface WithdrawnIncident {
+    id: string;
+    status: "approved";
+    withdrawn_at: string;
+    published_at: null;
+}
+
+export type WithdrawalResult =
+    | {
+    outcome: "withdrawn";
+    incident: WithdrawnIncident;
+}
+    | {
+    outcome: "not_found";
+}
+    | {
+    outcome: "not_withdrawable";
+};
+
+/**
+ * Atomically withdraw an approved report and record
+ * which moderator performed the action.
+ *
+ * Reasons are private and must not be returned through
+ * the public archive.
+ */
+export async function withdrawIncident(
+    db: D1Database,
+    id: string,
+    moderatorEmail: string,
+    reason: string
+): Promise<WithdrawalResult> {
+    const email = moderatorEmail.trim().toLowerCase();
+    const cleanReason = reason.trim();
+
+    if (!email) {
+        throw new Error("VERIFIED_MODERATOR_REQUIRED");
+    }
+
+    if (
+        cleanReason.length < 10 ||
+        cleanReason.length > 500
+    ) {
+        throw new RangeError("INVALID_WITHDRAWAL_REASON");
+    }
+
+    const auditId = crypto.randomUUID();
+
+    const updateStatement = db
+        .prepare(
+            `UPDATE incidents
+             SET
+                 withdrawn_at = CURRENT_TIMESTAMP,
+                 published_at = NULL
+             WHERE id = ?
+               AND status = 'approved'
+               AND withdrawn_at IS NULL
+             RETURNING
+                 id,
+                 status,
+                 withdrawn_at,
+                 published_at`
+        )
+        .bind(id);
+
+    const auditStatement = db
+        .prepare(
+            `INSERT INTO incident_withdrawal_audit (
+                id,
+                incident_id,
+                moderator_email,
+                reason
+             )
+             SELECT ?, ?, ?, ?
+             WHERE changes() = 1`
+        )
+        .bind(
+            auditId,
+            id,
+            email,
+            cleanReason
+        );
+
+    /**
+     * Both operations run in one D1 transaction.
+     * If the audit insert fails, the database update
+     * must also roll back.
+     */
+    const results = await db.batch([
+        updateStatement,
+        auditStatement,
+    ]);
+
+    const update = results[0];
+    const audit = results[1];
+
+    if (!update.success || !audit.success) {
+        throw new Error("WITHDRAWAL_TRANSACTION_FAILED");
+    }
+
+    const incident = (
+        update.results as unknown as WithdrawnIncident[]
+    )[0];
+
+    if (incident) {
+        if (
+            update.meta.changes !== 1 ||
+            audit.meta.changes !== 1
+        ) {
+            throw new Error("WITHDRAWAL_AUDIT_MISMATCH");
+        }
+
+        return {
+            outcome: "withdrawn",
+            incident,
+        };
+    }
+
+    if (
+        update.meta.changes !== 0 ||
+        audit.meta.changes !== 0
+    ) {
+        throw new Error("UNEXPECTED_WITHDRAWAL_RESULT");
+    }
+
+    const existing = await db
+        .prepare(
+            "SELECT id FROM incidents WHERE id = ?"
+        )
+        .bind(id)
+        .first<{ id: string }>();
+
+    return existing
+        ? { outcome: "not_withdrawable" }
+        : { outcome: "not_found" };
+}
+

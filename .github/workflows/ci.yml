@@ -71,6 +71,7 @@ jobs:
           cmp ../admin-worker/migrations/0002_create_moderation_audit.sql ../integration/migrations/0002_create_moderation_audit.sql
           cmp migrations/0003_add_incident_test_flag.sql ../integration/migrations/0003_add_incident_test_flag.sql
           cmp migrations/0004_add_submission_idempotency.sql ../integration/migrations/0004_add_submission_idempotency.sql
+          cmp migrations/0005_add_incident_withdrawals.sql ../integration/migrations/0005_add_incident_withdrawals.sql
 
       - name: TypeScript
         run: npm run typecheck

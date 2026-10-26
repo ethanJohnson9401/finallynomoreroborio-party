@@ -11,7 +11,7 @@ export default defineConfig({
     plugins: [
         cloudflareTest(async () => {
             const migrationsPath = fileURLToPath(
-                new URL("./migrations/", import.meta.url)
+                new URL("../integration/migrations/", import.meta.url)
             );
 
             const migrations = await readD1Migrations(

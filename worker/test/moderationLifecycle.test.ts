@@ -166,6 +166,13 @@ async function getAuditCount(id: string): Promise<number> {
 async function cleanUp(id: string) {
 	await env.DB
 		.prepare(
+			"DELETE FROM incident_withdrawal_audit WHERE incident_id = ?"
+		)
+		.bind(id)
+		.run();
+
+	await env.DB
+		.prepare(
 			"DELETE FROM moderation_audit WHERE incident_id = ?"
 		)
 		.bind(id)
@@ -360,4 +367,151 @@ describe("Complete incident moderation lifecycle", () => {
 			}
 		}
 	});
+
+
+	it("removes a withdrawn incident from the public Memorial", async () => {
+		mockTurnstile();
+
+		const key = crypto.randomUUID();
+		const story =
+			"Integration test: the roboRIO mysteriously lost communications during the championship match.";
+
+		const reason =
+			"Privacy removal requested by the incident submitter.";
+
+		let incidentId: string | null = null;
+
+		try {
+			// 1. Submit a new incident.
+			const submission = await submit(key, story);
+
+			expect(submission.status).toBe(201);
+
+			const receipt = await submission.json() as {
+				id: string;
+			};
+
+			incidentId = receipt.id;
+
+			// 2. Approve the incident through the Admin API.
+			const approval = await review(
+				incidentId,
+				"approve"
+			);
+
+			expect(approval.status).toBe(200);
+
+			// 3. Confirm that it appears publicly.
+			const beforeResponse = await getArchive();
+
+			expect(beforeResponse.status).toBe(200);
+
+			const before = await beforeResponse.json() as {
+				incidents: Array<{ id: string }>;
+			};
+
+			expect(
+				before.incidents.some(
+					(item) => item.id === incidentId
+				)
+			).toBe(true);
+
+			// 4. Withdraw the report using the real Admin API.
+			const withdrawal = await adminWorker.fetch(
+				new Request(
+					`${ADMIN_URL}/${incidentId}/withdraw`,
+					{
+						method: "POST",
+						headers: {
+							Origin: DASHBOARD_ORIGIN,
+							"Content-Type": "application/json",
+						},
+						body: JSON.stringify({ reason }),
+					}
+				),
+				adminEnv,
+				moderatorContext
+			);
+
+			expect(withdrawal.status).toBe(200);
+
+			// 5. The report stays approved but is unpublished.
+			const incident = await env.DB
+				.prepare(
+					`SELECT
+                    status,
+                    published_at,
+                    withdrawn_at
+                 FROM incidents
+                 WHERE id = ?`
+				)
+				.bind(incidentId)
+				.first<{
+					status: string;
+					published_at: string | null;
+					withdrawn_at: string | null;
+				}>();
+
+			expect(incident?.status).toBe("approved");
+			expect(incident?.published_at).toBeNull();
+			expect(incident?.withdrawn_at).not.toBeNull();
+
+			// 6. Confirm it has disappeared from the public API.
+			const afterResponse = await getArchive();
+
+			expect(afterResponse.status).toBe(200);
+
+			const after = await afterResponse.json() as {
+				incidents: Array<{ id: string }>;
+			};
+
+			expect(
+				after.incidents.some(
+					(item) => item.id === incidentId
+				)
+			).toBe(false);
+
+			// 7. Confirm the private withdrawal audit exists.
+			const audit = await env.DB
+				.prepare(
+					`SELECT moderator_email, reason
+                 FROM incident_withdrawal_audit
+                 WHERE incident_id = ?`
+				)
+				.bind(incidentId)
+				.first<{
+					moderator_email: string;
+					reason: string;
+				}>();
+
+			expect(audit).toEqual({
+				moderator_email: "admin@example.com",
+				reason,
+			});
+
+			// 8. Repeated withdrawal must fail.
+			const secondWithdrawal = await adminWorker.fetch(
+				new Request(
+					`${ADMIN_URL}/${incidentId}/withdraw`,
+					{
+						method: "POST",
+						headers: {
+							Origin: DASHBOARD_ORIGIN,
+							"Content-Type": "application/json",
+						},
+						body: JSON.stringify({ reason }),
+					}
+				),
+				adminEnv,
+				moderatorContext
+			);
+
+			expect(secondWithdrawal.status).toBe(409);
+		} finally {
+			if (incidentId) {
+				await cleanUp(incidentId);
+			}
+		}
+	});
+
 });

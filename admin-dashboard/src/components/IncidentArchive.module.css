@@ -1,0 +1,240 @@
+
+.archive {
+    margin-top: 80px;
+    padding: 40px;
+    border: 1px solid #35413a;
+    background: #151b18;
+    color: #f0f1e9;
+}
+
+.header {
+    border-bottom: 1px solid #35413a;
+    padding-bottom: 28px;
+    margin-bottom: 32px;
+}
+
+.eyebrow,
+.search label,
+.actionArea label,
+.metadata,
+.counter,
+.recordTop,
+.notEligible {
+    font-family: "DM Mono", monospace;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+}
+
+.eyebrow {
+    color: #c4f34c;
+}
+
+.header h2 {
+    margin: 12px 0;
+    font-size: clamp(30px, 4vw, 54px);
+    font-weight: 900;
+    line-height: 0.95;
+    letter-spacing: -0.055em;
+}
+
+.header h2 sup {
+    font-size: 14px;
+    vertical-align: top;
+}
+
+.header p,
+.actionArea p {
+    color: #a5b2a8;
+    font-family: "DM Mono", monospace;
+    font-size: 12px;
+    line-height: 1.7;
+}
+
+.search label,
+.actionArea label {
+    display: block;
+    margin-bottom: 12px;
+    color: #c4f34c;
+}
+
+.searchRow {
+    display: flex;
+    gap: 12px;
+}
+
+.searchRow input,
+.actionArea textarea {
+    min-width: 0;
+    width: 100%;
+    padding: 16px;
+    color: #f0f1e9;
+    border: 1px solid #47574d;
+    border-radius: 0;
+    background: #0c100e;
+    font: 13px "DM Mono", monospace;
+}
+
+.searchRow input:focus-visible,
+.actionArea textarea:focus-visible,
+.archive button:focus-visible {
+    outline: 2px solid #c4f34c;
+    outline-offset: 3px;
+}
+
+.archive button {
+    padding: 14px 20px;
+    border: 1px solid #c4f34c;
+    border-radius: 0;
+    background: #c4f34c;
+    color: #151b18;
+    font: 700 12px "DM Mono", monospace;
+    cursor: pointer;
+}
+
+.archive button:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.error,
+.success {
+    margin: 24px 0 0;
+    padding: 14px 16px;
+    font: 12px "DM Mono", monospace;
+    line-height: 1.6;
+}
+
+.error {
+    border: 1px solid #a54f45;
+    color: #ff998b;
+}
+
+.success {
+    border: 1px solid #678c45;
+    color: #c4f34c;
+}
+
+.record {
+    margin-top: 32px;
+    border: 1px solid #47574d;
+    background: #0c100e;
+}
+
+.recordTop {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 18px;
+    border-bottom: 1px solid #35413a;
+    overflow-wrap: anywhere;
+}
+
+.recordTop strong {
+    color: #c4f34c;
+}
+
+.story {
+    padding: 24px 18px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    line-height: 1.75;
+}
+
+.metadata {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    padding: 18px;
+    border-top: 1px solid #35413a;
+    color: #a5b2a8;
+}
+
+.actionArea {
+    padding: 24px 18px;
+    border-top: 1px solid #47574d;
+}
+
+.actionArea h3 {
+    margin: 0 0 8px;
+    color: #ff998b;
+    font-size: 22px;
+    font-weight: 900;
+}
+
+.actionArea textarea {
+    resize: vertical;
+}
+
+.counter {
+    display: block;
+    margin: 8px 0 20px;
+    color: #a5b2a8;
+    text-align: right;
+}
+
+.archive .dangerButton {
+    border-color: #ff998b;
+    background: #ff998b;
+    color: #151b18;
+}
+
+.confirm {
+    margin-top: 16px;
+    padding: 20px;
+    border: 1px solid #ff998b;
+}
+
+.confirm strong {
+    color: #ff998b;
+}
+
+.confirmActions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+
+.confirmActions button:first-child {
+    background: transparent;
+    color: #f0f1e9;
+    border-color: #68766b;
+}
+
+.notEligible {
+    padding: 18px;
+    border-top: 1px solid #35413a;
+    color: #a5b2a8;
+}
+
+@media (max-width: 680px) {
+    .archive {
+        padding: 22px 16px;
+        margin-top: 48px;
+    }
+
+    .searchRow {
+        flex-direction: column;
+    }
+
+    .searchRow input,
+    .searchRow button {
+        width: 100%;
+    }
+
+    .recordTop {
+        flex-direction: column;
+    }
+
+    .confirmActions {
+        flex-direction: column;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .archive *,
+    .archive *::before,
+    .archive *::after {
+        transition: none !important;
+        animation: none !important;
+    }
+}
