@@ -1,36 +1,126 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# FINALLY NO MORE ROBORIO.
 
-## Getting Started
+**The retirement party that legacy FRC hardware never asked for.**
 
-First, run the development server:
+The roboRIO has served FIRST Robotics Competition teams for years. Through robot disconnects, late-night deploys, mysterious status lights, and approximately ten million power cycles, it has given us memories we'd rather forget.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+Now we're celebrating the next generation of FRC robot controllers with a ridiculously overproduced retirement party.
+
+**[Visit the website](https://finallynomoreroborio.party)**
+
+## What is this?
+
+Finally No More roboRIO is an open-source, unofficial FRC parody website featuring:
+
+- A dramatic retirement celebration for the roboRIO.
+- A countdown to the 2027 FRC kickoff.
+- An anonymous roboRIO Trauma Center where teams can submit their experiences.
+- A moderated public Incident Memorial.
+- A private moderation dashboard.
+- An unreasonable number of robotics programming jokes.
+
+Built by FRC enthusiasts, for FRC enthusiasts.
+
+## Technology
+
+| Component | Technology |
+|---|---|
+| Public website | Next.js, React, TypeScript, Tailwind CSS |
+| Public API | Cloudflare Workers |
+| Database | Cloudflare D1 |
+| Human verification | Cloudflare Turnstile |
+| Moderation dashboard | Next.js, React, TypeScript |
+| Moderator authentication | Cloudflare Access |
+| Automated testing | Vitest, GitHub Actions |
+| Hosting | Cloudflare Workers and static assets |
+
+## Project structure
+
+```text
+finallynomoreroborio-party/
+├── src/                  Public website
+├── public/               Public assets
+├── worker/               Public API and D1 migrations
+├── admin-worker/         Protected moderation API
+├── admin-dashboard/      Moderation dashboard
+├── website-worker/       Public website deployment
+├── dashboard-worker/     Admin dashboard deployment
+└── .github/workflows/    Automated CI
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Local development
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+**Requirements:** Node.js 24 and npm.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Clone the repository:
 
-## Learn More
+```bash
+git clone https://github.com/ethanJohnson9401/finallynomoreroborio-party.git
+cd finallynomoreroborio-party
+```
 
-To learn more about Next.js, take a look at the following resources:
+Install dependencies for the public website:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+npm ci
+npm run dev
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+The frontend runs at `http://localhost:3000`.
 
-## Deploy on Vercel
+The public API, admin API, and dashboard are separate projects with their own dependencies and development configurations. Cloudflare Workers and D1 require additional local setup.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Never commit `.env.local`, `.dev.vars`, production API tokens, Turnstile secrets, or moderator credentials.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Testing
+
+Run the public website checks:
+
+```bash
+npm run lint
+npm run build
+```
+
+Test the public API:
+
+```bash
+cd worker
+npm ci
+npm test -- --run
+npm run typecheck
+```
+
+Test the moderation API:
+
+```bash
+cd admin-worker
+npm ci
+npm test -- --run
+npx tsc --noEmit
+```
+
+GitHub Actions automatically validates the website, APIs, and admin dashboard on pushes and pull requests.
+
+## Submitting incidents
+
+The roboRIO Trauma Center allows anonymous incident submissions when intake is enabled.
+
+Reports are validated, rate-limited, verified using Cloudflare Turnstile, and stored as pending moderation.
+
+**Incidents are never automatically published.** A moderator must approve each report before it appears on the public Memorial Wall.
+
+Please do not submit personal information, private contact details, credentials, or identifying information about other people.
+
+## Contributing
+
+Contributions, bug reports, performance improvements, accessibility fixes, and sufficiently ridiculous roboRIO jokes are welcome.
+
+Please open an issue before starting major architectural changes.
+
+## Disclaimer
+
+This is an unofficial community parody project.
+
+It is not affiliated with, endorsed by, or operated by FIRST, National Instruments, or any other FRC hardware manufacturer.
+
+All trademarks and product names belong to their respective owners.
