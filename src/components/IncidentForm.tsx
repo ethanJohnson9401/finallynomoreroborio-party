@@ -236,6 +236,7 @@ export default function IncidentForm() {
                         story: trimmedStory,
                         turnstileToken,
                     }),
+                    signal: AbortSignal.timeout(15000),
                 }
             );
 
@@ -285,11 +286,31 @@ export default function IncidentForm() {
             setReceiptId(result.id);
             setStory("");
         } catch (error) {
-            setSubmissionError(
-                error instanceof Error
-                    ? error.message
-                    : "Unable to contact the incident API."
-            );
+            if (
+                error instanceof Error &&
+                (error.name === "TimeoutError" ||
+                    error.name === "AbortError")
+            ) {
+                setSubmissionError(
+                    "The incident server took too long to respond. " +
+                    "Your report could not be confirmed. " +
+                    "Check the moderation status before retrying."
+                );
+            } else if (
+                error instanceof TypeError
+            ) {
+                setSubmissionError(
+                    "Unable to reach the incident server. " +
+                    "Please check your connection and try again. " +
+                    "Your report has not been confirmed."
+                );
+            } else {
+                setSubmissionError(
+                    error instanceof Error
+                        ? error.message
+                        : "Unable to contact the incident API."
+                );
+            }
         } finally {
             resetTurnstile();
             setIsSubmitting(false);
