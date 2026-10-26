@@ -111,6 +111,18 @@ Reports are validated, rate-limited, verified using Cloudflare Turnstile, and st
 
 Please do not submit personal information, private contact details, credentials, or identifying information about other people.
 
+## Privacy and content moderation
+
+Incident submissions are anonymous and require moderator
+approval before publication.
+
+Do not submit personal information, identifying details,
+or private contact information.
+
+Read our [Privacy and Content Policy](PRIVACY.md) for
+information about submissions, moderation, data handling,
+and removal requests.
+
 ## Contributing
 
 Contributions, bug reports, performance improvements, accessibility fixes, and sufficiently ridiculous roboRIO jokes are welcome.
