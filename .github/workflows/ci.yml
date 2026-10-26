@@ -65,6 +65,13 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Verify integration migration consistency
+        run: |
+          cmp migrations/0001_create_incidents.sql ../integration/migrations/0001_create_incidents.sql
+          cmp ../admin-worker/migrations/0002_create_moderation_audit.sql ../integration/migrations/0002_create_moderation_audit.sql
+          cmp migrations/0003_add_incident_test_flag.sql ../integration/migrations/0003_add_incident_test_flag.sql
+          cmp migrations/0004_add_submission_idempotency.sql ../integration/migrations/0004_add_submission_idempotency.sql
+
       - name: TypeScript
         run: npm run typecheck
 
