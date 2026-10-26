@@ -65,6 +65,7 @@ function validBody() {
 	return {
 		story: VALID_STORY,
 		turnstileToken: TEST_TOKEN,
+		submissionKey: crypto.randomUUID(),
 	};
 }
 

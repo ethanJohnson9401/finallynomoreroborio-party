@@ -72,8 +72,15 @@ function getSubmissionError(
         return "Your incident must contain between 20 and 1000 characters.";
     }
 
+    if (
+        status === 409 &&
+        code === "SUBMISSION_KEY_CONFLICT"
+    ) {
+        return "This submission key was already used for a different report. Please edit your report and submit again.";
+    }
+
     if (status === 503) {
-        return "The incident API is temporarily unavailable. Your report has not been saved.";
+        return "The incident API is temporarily unavailable. Your report has not been confirmed.";
     }
 
     return `Incident transmission failed (HTTP ${status}). Your report has not been confirmed.`;
@@ -91,6 +98,15 @@ export default function IncidentForm() {
 
     const turnstileRef =
         useRef<TurnstileInstance | null>(null);
+
+    /**
+     * Keep the same submission UUID after an unconfirmed
+     * attempt. This prevents duplicate records on retry.
+     *
+     * A different story or confirmed success clears the key.
+     */
+    const submissionKeyRef =
+        useRef<string | null>(null);
 
     const [isSubmitting, setIsSubmitting] =
         useState(false);
@@ -117,9 +133,10 @@ export default function IncidentForm() {
         !isSubmitting;
 
     /**
-     * Read current intake availability.
+     * Check whether the public API currently
+     * permits incident submissions.
      *
-     * An unavailable status API fails closed.
+     * If the check fails, intake fails closed.
      */
     const checkAvailability = useCallback(
         async (signal?: AbortSignal) => {
@@ -171,7 +188,7 @@ export default function IncidentForm() {
     );
 
     /**
-     * Initial availability request.
+     * Check availability when the component mounts.
      */
     useEffect(() => {
         const controller = new AbortController();
@@ -188,17 +205,16 @@ export default function IncidentForm() {
     }, [checkAvailability]);
 
     /**
-     * Single-use Turnstile tokens must be reset
-     * after every submission attempt.
+     * Turnstile tokens are single-use.
+     *
+     * Each retry requires a fresh verification token,
+     * even if the submission UUID is reused.
      */
     function resetTurnstile() {
         setTurnstileToken(null);
         turnstileRef.current?.reset();
     }
 
-    /**
-     * Retry the availability request.
-     */
     async function retryAvailability() {
         setIntakeStatus("checking");
         await checkAvailability();
@@ -220,6 +236,16 @@ export default function IncidentForm() {
             return;
         }
 
+        /**
+         * Generate a new UUID for a new report.
+         * Reuse it if the previous attempt was unconfirmed.
+         */
+        const submissionKey =
+            submissionKeyRef.current ??
+            crypto.randomUUID();
+
+        submissionKeyRef.current = submissionKey;
+
         setIsSubmitting(true);
         setSubmissionError(null);
         setReceiptId(null);
@@ -235,6 +261,7 @@ export default function IncidentForm() {
                     body: JSON.stringify({
                         story: trimmedStory,
                         turnstileToken,
+                        submissionKey,
                     }),
                     signal: AbortSignal.timeout(15000),
                 }
@@ -263,7 +290,15 @@ export default function IncidentForm() {
                 );
             }
 
-            if (response.status !== 201) {
+            /**
+             * 201 means a new incident was created.
+             * 200 means an already accepted submission
+             * was safely replayed using the same UUID.
+             */
+            if (
+                response.status !== 201 &&
+                response.status !== 200
+            ) {
                 throw new Error(
                     "Unexpected API response. Your report has not been confirmed."
                 );
@@ -283,9 +318,21 @@ export default function IncidentForm() {
                 );
             }
 
+            /**
+             * Receipt confirmed.
+             *
+             * The current report is finished, so the
+             * next report receives a new submission UUID.
+             */
             setReceiptId(result.id);
             setStory("");
+            submissionKeyRef.current = null;
         } catch (error) {
+            /**
+             * On uncertain failures, preserve the UUID.
+             * The server may have committed the report
+             * before the response was lost.
+             */
             if (
                 error instanceof Error &&
                 (error.name === "TimeoutError" ||
@@ -294,15 +341,17 @@ export default function IncidentForm() {
                 setSubmissionError(
                     "The incident server took too long to respond. " +
                     "Your report could not be confirmed. " +
-                    "Check the moderation status before retrying."
+                    "Complete human verification again before retrying. " +
+                    "The same report will not be filed twice."
                 );
             } else if (
                 error instanceof TypeError
             ) {
                 setSubmissionError(
                     "Unable to reach the incident server. " +
-                    "Please check your connection and try again. " +
-                    "Your report has not been confirmed."
+                    "Your report has not been confirmed. " +
+                    "Check your connection, complete verification again, " +
+                    "and retry without changing your report."
                 );
             } else {
                 setSubmissionError(
@@ -437,6 +486,7 @@ export default function IncidentForm() {
                 value={story}
                 onChange={(event) => {
                     setStory(event.target.value);
+                    submissionKeyRef.current = null;
                     setSubmissionError(null);
                     setReceiptId(null);
                 }}

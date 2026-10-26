@@ -69,6 +69,7 @@ function makeSubmissionRequest(ip: string) {
 		body: JSON.stringify({
 			story: STORY,
 			turnstileToken: TEST_TOKEN,
+			submissionKey: crypto.randomUUID(),
 		}),
 	});
 }

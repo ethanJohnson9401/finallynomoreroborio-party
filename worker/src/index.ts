@@ -10,12 +10,12 @@
  * - Incident validation
  * - Rate limiting
  * - Turnstile verification
- * - Moderated submissions
+ * - Idempotent moderated submissions
  * - Public approved-incidents archive
  */
 
 import {
-	createIncident,
+	createIdempotentIncident,
 } from "./db/incidents";
 
 import {
@@ -49,7 +49,6 @@ import { validateIncident } from "./validation/incident";
  */
 interface Env {
 	DB: D1Database;
-
 	INCIDENT_LIMITER: RateLimit;
 
 	DEPLOYMENT_ENV?: string;
@@ -58,6 +57,15 @@ interface Env {
 	TURNSTILE_SECRET_KEY: string;
 	TURNSTILE_TEST_MODE?: string;
 }
+
+/**
+ * Require a properly formatted UUID.
+ *
+ * The frontend will generate this using
+ * crypto.randomUUID().
+ */
+const SUBMISSION_KEY_PATTERN =
+	/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const worker = {
 	async fetch(
@@ -126,11 +134,8 @@ async function handleRequest(
 	/**
 	 * GET /api/incidents/config
 	 *
-	 * Report whether incident submissions
-	 * are currently permitted.
-	 *
-	 * Do not expose deployment secrets or
-	 * internal configuration details.
+	 * Report whether submissions are currently enabled.
+	 * Never disclose deployment secrets.
 	 */
 	if (
 		url.pathname === "/api/incidents/config"
@@ -152,8 +157,6 @@ async function handleRequest(
 
 	/**
 	 * GET /api/health
-	 *
-	 * Lightweight public API health check.
 	 */
 	if (url.pathname === "/api/health") {
 		if (request.method !== "GET") {
@@ -172,12 +175,10 @@ async function handleRequest(
 	/**
 	 * GET /api/health/db
 	 *
-	 * Check database connectivity without
-	 * disclosing stored incident counts.
+	 * Verify D1 connectivity without revealing
+	 * incident counts or moderation information.
 	 */
-	if (
-		url.pathname === "/api/health/db"
-	) {
+	if (url.pathname === "/api/health/db") {
 		if (request.method !== "GET") {
 			return jsonResponse(
 				{ error: "METHOD_NOT_ALLOWED" },
@@ -186,13 +187,6 @@ async function handleRequest(
 		}
 
 		try {
-			/**
-			 * A lightweight query verifies that
-			 * the D1 binding can execute SQL.
-			 *
-			 * Do not select incident records,
-			 * counts, or moderation information.
-			 */
 			await env.DB
 				.prepare("SELECT 1 AS healthy")
 				.first();
@@ -221,13 +215,7 @@ async function handleRequest(
 	 * GET /api/incidents/approved
 	 *
 	 * Public, read-only incident archive.
-	 *
-	 * Query parameters:
-	 * - limit: 1 to 20, default 8
-	 * - cursor: optional pagination cursor
-	 *
-	 * The archive remains readable even
-	 * when new submissions are disabled.
+	 * Remains available when submissions are disabled.
 	 */
 	if (
 		url.pathname ===
@@ -271,9 +259,9 @@ async function handleRequest(
 	/**
 	 * POST /api/incidents
 	 *
-	 * Anonymous incident submission.
-	 * Every submission begins in pending status
-	 * and requires moderator approval.
+	 * Every new incident begins pending.
+	 * Repeated verified requests with the same key
+	 * return the original receipt.
 	 */
 	if (url.pathname === "/api/incidents") {
 		if (request.method !== "POST") {
@@ -284,7 +272,7 @@ async function handleRequest(
 		}
 
 		/**
-		 * Require application/json.
+		 * Require JSON.
 		 */
 		const contentType =
 			request.headers.get("content-type") ?? "";
@@ -301,8 +289,8 @@ async function handleRequest(
 		}
 
 		/**
-		 * Read JSON using the existing
-		 * request body size limit.
+		 * Enforce request body size limit
+		 * and parse JSON safely.
 		 */
 		const parsed =
 			await readJsonBody(request);
@@ -317,7 +305,7 @@ async function handleRequest(
 		const body = parsed.body;
 
 		/**
-		 * Validate the incident story.
+		 * Validate incident story.
 		 */
 		const validation =
 			validateIncident(body);
@@ -330,7 +318,7 @@ async function handleRequest(
 		}
 
 		/**
-		 * Extract the Turnstile token.
+		 * Extract Turnstile token.
 		 */
 		const turnstileToken =
 			typeof body === "object" &&
@@ -345,17 +333,44 @@ async function handleRequest(
 		if (!turnstileToken) {
 			return jsonResponse(
 				{
-					error:
-						"TURNSTILE_TOKEN_REQUIRED",
+					error: "TURNSTILE_TOKEN_REQUIRED",
 				},
 				400
 			);
 		}
 
 		/**
-		 * Verify submission configuration
-		 * BEFORE attempting rate limiting,
-		 * Turnstile, or D1 writes.
+		 * Extract and validate submission UUID.
+		 *
+		 * This key is NOT an authentication token.
+		 */
+		const submissionKey =
+			typeof body === "object" &&
+			body !== null &&
+			!Array.isArray(body) &&
+			"submissionKey" in body &&
+			typeof body.submissionKey ===
+			"string"
+				? body.submissionKey
+				: "";
+
+		if (
+			submissionKey.length !== 36 ||
+			!SUBMISSION_KEY_PATTERN.test(
+				submissionKey
+			)
+		) {
+			return jsonResponse(
+				{
+					error: "INVALID_SUBMISSION_KEY",
+				},
+				400
+			);
+		}
+
+		/**
+		 * Verify submission configuration BEFORE
+		 * rate limiting, Turnstile, or D1 writes.
 		 *
 		 * Unsafe configuration fails closed.
 		 */
@@ -388,8 +403,7 @@ async function handleRequest(
 
 			return jsonResponse(
 				{
-					error:
-						"RATE_LIMIT_UNAVAILABLE",
+					error: "RATE_LIMIT_UNAVAILABLE",
 				},
 				503
 			);
@@ -404,6 +418,8 @@ async function handleRequest(
 
 		/**
 		 * Verify Turnstile server-side.
+		 *
+		 * Idempotency NEVER bypasses verification.
 		 */
 		const verified =
 			await verifyTurnstile(
@@ -415,34 +431,47 @@ async function handleRequest(
 		if (!verified) {
 			return jsonResponse(
 				{
-					error:
-						"TURNSTILE_VERIFICATION_FAILED",
+					error: "TURNSTILE_VERIFICATION_FAILED",
 				},
 				403
 			);
 		}
 
 		/**
-		 * Store the incident as pending.
+		 * Atomically create or reuse a pending
+		 * incident by submission key.
 		 *
-		 * No incident is automatically published.
+		 * Never expose its current moderation status
+		 * when returning a replay receipt.
 		 */
 		try {
-			const incident =
-				await createIncident(
+			const result =
+				await createIdempotentIncident(
 					env.DB,
-					validation.story
+					validation.story,
+					submissionKey
 				);
+
+			if (result.outcome === "conflict") {
+				return jsonResponse(
+					{
+						error: "SUBMISSION_KEY_CONFLICT",
+					},
+					409
+				);
+			}
 
 			return jsonResponse(
 				{
 					status: "received",
-					id: incident.id,
-					moderation: incident.status,
+					id: result.id,
+					moderation: "pending",
 					message:
 						"Incident report received for review.",
 				},
-				201
+				result.outcome === "created"
+					? 201
+					: 200
 			);
 		} catch (error) {
 			console.error(
@@ -452,8 +481,7 @@ async function handleRequest(
 
 			return jsonResponse(
 				{
-					error:
-						"INCIDENT_STORAGE_FAILED",
+					error: "INCIDENT_STORAGE_FAILED",
 				},
 				503
 			);
