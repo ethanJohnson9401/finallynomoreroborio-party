@@ -4,8 +4,8 @@
  * Cloudflare Worker API
  *
  * Features:
- * - Health checks
- * - D1 connectivity
+ * - Public health checks
+ * - Privacy-safe D1 connectivity checks
  * - CORS protection
  * - Incident validation
  * - Rate limiting
@@ -15,7 +15,6 @@
  */
 
 import {
-	countIncidents,
 	createIncident,
 } from "./db/incidents";
 
@@ -45,6 +44,9 @@ import { readJsonBody } from "./utils/request";
 import { jsonResponse } from "./utils/response";
 import { validateIncident } from "./validation/incident";
 
+/**
+ * Cloudflare Worker environment bindings.
+ */
 interface Env {
 	DB: D1Database;
 
@@ -65,7 +67,7 @@ const worker = {
 		const url = new URL(request.url);
 
 		/**
-		 * Handle submission preflight.
+		 * Handle CORS preflight for submissions.
 		 */
 		if (
 			url.pathname === "/api/incidents" &&
@@ -75,7 +77,10 @@ const worker = {
 		}
 
 		/**
-		 * Restrict public submission origins.
+		 * Reject incident submissions from
+		 * disallowed browser origins.
+		 *
+		 * CORS is not an authentication mechanism.
 		 */
 		if (
 			url.pathname === "/api/incidents" &&
@@ -100,7 +105,10 @@ const worker = {
 			env
 		);
 
-		return addCorsHeaders(request, response);
+		return addCorsHeaders(
+			request,
+			response
+		);
 	},
 };
 
@@ -115,14 +123,18 @@ async function handleRequest(
 ): Promise<Response> {
 	const url = new URL(request.url);
 
-
 	/**
 	 * GET /api/incidents/config
 	 *
-	 * Public, read-only intake availability.
-	 * Never expose secrets or internal configuration.
+	 * Report whether incident submissions
+	 * are currently permitted.
+	 *
+	 * Do not expose deployment secrets or
+	 * internal configuration details.
 	 */
-	if (url.pathname === "/api/incidents/config") {
+	if (
+		url.pathname === "/api/incidents/config"
+	) {
 		if (request.method !== "GET") {
 			return jsonResponse(
 				{ error: "METHOD_NOT_ALLOWED" },
@@ -130,16 +142,18 @@ async function handleRequest(
 			);
 		}
 
-		const access = checkSubmissionAccess(env);
+		const access =
+			checkSubmissionAccess(env);
 
 		return jsonResponse({
 			submissionsEnabled: access.allowed,
 		});
 	}
 
-
 	/**
 	 * GET /api/health
+	 *
+	 * Lightweight public API health check.
 	 */
 	if (url.pathname === "/api/health") {
 		if (request.method !== "GET") {
@@ -157,8 +171,13 @@ async function handleRequest(
 
 	/**
 	 * GET /api/health/db
+	 *
+	 * Check database connectivity without
+	 * disclosing stored incident counts.
 	 */
-	if (url.pathname === "/api/health/db") {
+	if (
+		url.pathname === "/api/health/db"
+	) {
 		if (request.method !== "GET") {
 			return jsonResponse(
 				{ error: "METHOD_NOT_ALLOWED" },
@@ -167,13 +186,20 @@ async function handleRequest(
 		}
 
 		try {
-			const incidentCount =
-				await countIncidents(env.DB);
+			/**
+			 * A lightweight query verifies that
+			 * the D1 binding can execute SQL.
+			 *
+			 * Do not select incident records,
+			 * counts, or moderation information.
+			 */
+			await env.DB
+				.prepare("SELECT 1 AS healthy")
+				.first();
 
 			return jsonResponse({
 				status: "ok",
 				database: "connected",
-				incidents: incidentCount,
 			});
 		} catch (error) {
 			console.error(
@@ -200,11 +226,12 @@ async function handleRequest(
 	 * - limit: 1 to 20, default 8
 	 * - cursor: optional pagination cursor
 	 *
-	 * This endpoint does not depend on whether
-	 * new incident submissions are enabled.
+	 * The archive remains readable even
+	 * when new submissions are disabled.
 	 */
 	if (
-		url.pathname === "/api/incidents/approved"
+		url.pathname ===
+		"/api/incidents/approved"
 	) {
 		if (request.method !== "GET") {
 			return jsonResponse(
@@ -215,7 +242,10 @@ async function handleRequest(
 
 		try {
 			const result =
-				await getApprovedIncidents(env.DB, url);
+				await getApprovedIncidents(
+					env.DB,
+					url
+				);
 
 			if ("error" in result) {
 				return jsonResponse(
@@ -242,7 +272,8 @@ async function handleRequest(
 	 * POST /api/incidents
 	 *
 	 * Anonymous incident submission.
-	 * All new reports start in pending status.
+	 * Every submission begins in pending status
+	 * and requires moderator approval.
 	 */
 	if (url.pathname === "/api/incidents") {
 		if (request.method !== "POST") {
@@ -253,7 +284,7 @@ async function handleRequest(
 		}
 
 		/**
-		 * Require JSON content.
+		 * Require application/json.
 		 */
 		const contentType =
 			request.headers.get("content-type") ?? "";
@@ -270,9 +301,11 @@ async function handleRequest(
 		}
 
 		/**
-		 * Parse JSON with the existing body size limit.
+		 * Read JSON using the existing
+		 * request body size limit.
 		 */
-		const parsed = await readJsonBody(request);
+		const parsed =
+			await readJsonBody(request);
 
 		if (!parsed.ok) {
 			return jsonResponse(
@@ -284,9 +317,10 @@ async function handleRequest(
 		const body = parsed.body;
 
 		/**
-		 * Validate the submitted report.
+		 * Validate the incident story.
 		 */
-		const validation = validateIncident(body);
+		const validation =
+			validateIncident(body);
 
 		if (!validation.valid) {
 			return jsonResponse(
@@ -296,31 +330,37 @@ async function handleRequest(
 		}
 
 		/**
-		 * Extract Turnstile verification token.
+		 * Extract the Turnstile token.
 		 */
 		const turnstileToken =
 			typeof body === "object" &&
 			body !== null &&
 			!Array.isArray(body) &&
 			"turnstileToken" in body &&
-			typeof body.turnstileToken === "string"
+			typeof body.turnstileToken ===
+			"string"
 				? body.turnstileToken
 				: "";
 
 		if (!turnstileToken) {
 			return jsonResponse(
-				{ error: "TURNSTILE_TOKEN_REQUIRED" },
+				{
+					error:
+						"TURNSTILE_TOKEN_REQUIRED",
+				},
 				400
 			);
 		}
 
 		/**
-		 * Enforce submission configuration.
+		 * Verify submission configuration
+		 * BEFORE attempting rate limiting,
+		 * Turnstile, or D1 writes.
 		 *
-		 * Unsafe or missing configuration
-		 * must fail closed.
+		 * Unsafe configuration fails closed.
 		 */
-		const access = checkSubmissionAccess(env);
+		const access =
+			checkSubmissionAccess(env);
 
 		if (!access.allowed) {
 			return jsonResponse(
@@ -330,7 +370,7 @@ async function handleRequest(
 		}
 
 		/**
-		 * Enforce rate limiting.
+		 * Enforce Cloudflare rate limiting.
 		 */
 		let withinLimit: boolean;
 
@@ -347,7 +387,10 @@ async function handleRequest(
 			);
 
 			return jsonResponse(
-				{ error: "RATE_LIMIT_UNAVAILABLE" },
+				{
+					error:
+						"RATE_LIMIT_UNAVAILABLE",
+				},
 				503
 			);
 		}
@@ -360,13 +403,14 @@ async function handleRequest(
 		}
 
 		/**
-		 * Verify Cloudflare Turnstile token.
+		 * Verify Turnstile server-side.
 		 */
-		const verified = await verifyTurnstile(
-			turnstileToken,
-			env.TURNSTILE_SECRET_KEY,
-			access.testMode
-		);
+		const verified =
+			await verifyTurnstile(
+				turnstileToken,
+				env.TURNSTILE_SECRET_KEY,
+				access.testMode
+			);
 
 		if (!verified) {
 			return jsonResponse(
@@ -379,13 +423,16 @@ async function handleRequest(
 		}
 
 		/**
-		 * Store new incident for moderation.
+		 * Store the incident as pending.
+		 *
+		 * No incident is automatically published.
 		 */
 		try {
-			const incident = await createIncident(
-				env.DB,
-				validation.story
-			);
+			const incident =
+				await createIncident(
+					env.DB,
+					validation.story
+				);
 
 			return jsonResponse(
 				{
@@ -404,14 +451,17 @@ async function handleRequest(
 			);
 
 			return jsonResponse(
-				{ error: "INCIDENT_STORAGE_FAILED" },
+				{
+					error:
+						"INCIDENT_STORAGE_FAILED",
+				},
 				503
 			);
 		}
 	}
 
 	/**
-	 * Unknown endpoint.
+	 * Unknown API endpoint.
 	 */
 	return jsonResponse(
 		{ error: "NOT_FOUND" },

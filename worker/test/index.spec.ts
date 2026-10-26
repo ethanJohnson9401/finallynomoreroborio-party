@@ -1,9 +1,15 @@
 
-import { describe, expect, it } from "vitest";
+import {
+	describe,
+	expect,
+	it,
+} from "vitest";
+
 import { SELF } from "cloudflare:test";
 
 /**
- * Integration tests for the roboRIO Trauma Center API.
+ * Integration tests for the public
+ * roboRIO Trauma Center API.
  */
 describe("roboRIO Trauma Center API", () => {
 	it("returns a successful health check", async () => {
@@ -16,6 +22,34 @@ describe("roboRIO Trauma Center API", () => {
 		expect(await response.json()).toEqual({
 			status: "ok",
 			service: "roborio-trauma-api",
+		});
+	});
+
+	it("checks D1 connectivity without exposing incident counts", async () => {
+		const response = await SELF.fetch(
+			"http://localhost/api/health/db"
+		);
+
+		expect(response.status).toBe(200);
+
+		expect(await response.json()).toEqual({
+			status: "ok",
+			database: "connected",
+		});
+	});
+
+	it("rejects non-GET database health requests", async () => {
+		const response = await SELF.fetch(
+			"http://localhost/api/health/db",
+			{
+				method: "POST",
+			}
+		);
+
+		expect(response.status).toBe(405);
+
+		expect(await response.json()).toEqual({
+			error: "METHOD_NOT_ALLOWED",
 		});
 	});
 
@@ -37,8 +71,10 @@ describe("roboRIO Trauma Center API", () => {
 			{
 				method: "POST",
 				headers: {
-					"Content-Type": "application/json",
-					"CF-Connecting-IP": "192.0.2.10",
+					"Content-Type":
+						"application/json",
+					"CF-Connecting-IP":
+						"192.0.2.10",
 				},
 				body: JSON.stringify({
 					story:
@@ -60,17 +96,24 @@ describe("roboRIO Trauma Center API", () => {
 			{
 				method: "POST",
 				headers: {
-					"Content-Type": "application/json",
-					"CF-Connecting-IP": "192.0.2.11",
+					"Content-Type":
+						"application/json",
+					"CF-Connecting-IP":
+						"192.0.2.11",
 				},
 				body: JSON.stringify({
 					story: "Robot broke.",
-					turnstileToken: "XXXX.DUMMY.TOKEN.XXXX",
+					turnstileToken:
+						"XXXX.DUMMY.TOKEN.XXXX",
 				}),
 			}
 		);
 
 		expect(response.status).toBe(400);
+
+		expect(await response.json()).toEqual({
+			error: "INVALID_STORY_LENGTH",
+		});
 	});
 
 	it("rejects submissions with the wrong content type", async () => {
@@ -80,9 +123,11 @@ describe("roboRIO Trauma Center API", () => {
 				method: "POST",
 				headers: {
 					"Content-Type": "text/plain",
-					"CF-Connecting-IP": "192.0.2.12",
+					"CF-Connecting-IP":
+						"192.0.2.12",
 				},
-				body: "The roboRIO has betrayed us once again.",
+				body:
+					"The roboRIO has betrayed us once again.",
 			}
 		);
 
