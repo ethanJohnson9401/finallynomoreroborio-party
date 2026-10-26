@@ -15,7 +15,7 @@ interface AccessIdentity {
 }
 
 interface VerifiedAccess {
-	getIdentity(): Promise<AccessIdentity | null>;
+	getIdentity(): Promise<AccessIdentity | null | undefined>;
 }
 
 export interface ModeratorContext {
@@ -51,7 +51,7 @@ export async function authorizeModerator(
 		};
 	}
 
-	let identity: AccessIdentity | null;
+	let identity: AccessIdentity | null | undefined;
 
 	try {
 		identity = await context.access.getIdentity();

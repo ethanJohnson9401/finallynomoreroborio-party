@@ -92,4 +92,16 @@ describe("roboRIO Trauma Center API", () => {
 			error: "UNSUPPORTED_MEDIA_TYPE",
 		});
 	});
+
+	it("does not expose administrator endpoints", async () => {
+		const response = await SELF.fetch(
+			"http://localhost/api/admin/incidents"
+		);
+
+		expect(response.status).toBe(404);
+
+		expect(await response.json()).toEqual({
+			error: "NOT_FOUND",
+		});
+	});
 });

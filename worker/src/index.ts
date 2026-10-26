@@ -18,7 +18,6 @@
 import {
 	countIncidents,
 	createIncident,
-	getPendingIncidents,
 } from "./db/incidents";
 
 import { checkIncidentRateLimit } from "./security/rateLimit";
@@ -39,10 +38,6 @@ import { readJsonBody } from "./utils/request";
 import { jsonResponse } from "./utils/response";
 import { validateIncident } from "./validation/incident";
 
-import {
-	authorizeModerator,
-} from "./security/moderatorAuth";
-
 /**
  * Cloudflare Worker environment bindings.
  */
@@ -56,8 +51,6 @@ interface Env {
 
 	TURNSTILE_SECRET_KEY: string;
 	TURNSTILE_TEST_MODE?: string;
-
-	MODERATOR_EMAILS?: string;
 }
 
 /**
@@ -66,73 +59,9 @@ interface Env {
 export default {
 	async fetch(
 		request: Request,
-		env: Env,
-		ctx: ExecutionContext
+		env: Env
 	): Promise<Response> {
 		const url = new URL(request.url);
-
-
-		/**
-		 * Administrator-only incident review API.
-		 *
-		 * Handle this route before the public CORS logic
-		 * and before the normal application routes.
-		 */
-		if (url.pathname === "/api/admin/incidents") {
-			if (request.method !== "GET") {
-				return jsonResponse(
-					{ error: "METHOD_NOT_ALLOWED" },
-					405
-				);
-			}
-
-			/**
-			 * Require verified Cloudflare Access identity
-			 * and membership in our moderator allowlist.
-			 */
-			const authorization = await authorizeModerator(
-				{ access: ctx.access },
-				env
-			);
-
-			if (!authorization.authorized) {
-				const status =
-					authorization.reason === "UNAUTHENTICATED"
-						? 401
-						: 403;
-
-				return jsonResponse(
-					{ error: authorization.reason },
-					status
-				);
-			}
-
-			/**
-			 * Only authenticated moderators reach this code.
-			 */
-			try {
-				const incidents = await getPendingIncidents(
-					env.DB
-				);
-
-				return jsonResponse({
-					status: "ok",
-					incidents,
-					count: incidents.length,
-				});
-			} catch (error) {
-				console.error(
-					"Failed to load moderation queue:",
-					error
-				);
-
-				return jsonResponse(
-					{ error: "MODERATION_QUEUE_UNAVAILABLE" },
-					503
-				);
-			}
-		}
-
 
 		/**
 		 * Handle CORS preflight.
