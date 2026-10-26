@@ -79,3 +79,5 @@ out/
 
 # Logs
 *.log
+
+private-backups/
