@@ -1,9 +1,12 @@
 
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
-import { Turnstile } from "@marsidev/react-turnstile";
+import {
+    Turnstile,
+    type TurnstileInstance,
+} from "@marsidev/react-turnstile";
 
 const MIN_LENGTH = 20;
 const MAX_LENGTH = 1000;
@@ -30,19 +33,31 @@ const PLACEHOLDERS = [
     "Three programmers, two laptops, and one roboRIO. Somehow, the roboRIO won.",
 ];
 
+interface IncidentReceipt {
+    status: "received";
+    id: string;
+    moderation: "pending";
+    message: string;
+}
+
 export default function IncidentForm() {
     const [story, setStory] = useState("");
     const [placeholder, setPlaceholder] = useState(PLACEHOLDERS[0]);
 
-    const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+    const [turnstileToken, setTurnstileToken] =
+        useState<string | null>(null);
+
+    const turnstileRef = useRef<TurnstileInstance | null>(null);
 
     const [isSubmitting, setIsSubmitting] = useState(false);
-    const [submissionError, setSubmissionError] = useState<string | null>(null);
+    const [submissionError, setSubmissionError] =
+        useState<string | null>(null);
+
     const [showNotice, setShowNotice] = useState(false);
+    const [receiptId, setReceiptId] = useState<string | null>(null);
 
     /**
-     * Choose one random placeholder when the component mounts.
-     * It won't change while the visitor is writing.
+     * Choose a random placeholder when the component mounts.
      */
     useEffect(() => {
         const randomIndex = Math.floor(
@@ -63,10 +78,18 @@ export default function IncidentForm() {
         trimmedStory.length <= MAX_LENGTH;
 
     /**
-     * Submit the incident to our Cloudflare Worker.
+     * Reset the Turnstile widget and its stored token.
      *
-     * The Worker currently returns HTTP 501 for valid
-     * submissions because database storage is disabled.
+     * Tokens are single-use and should be refreshed after
+     * every submission attempt.
+     */
+    function resetTurnstile() {
+        setTurnstileToken(null);
+        turnstileRef.current?.reset();
+    }
+
+    /**
+     * Submit the incident to our Cloudflare Worker.
      */
     async function handleSubmit(
         event: FormEvent<HTMLFormElement>
@@ -80,6 +103,7 @@ export default function IncidentForm() {
         setIsSubmitting(true);
         setSubmissionError(null);
         setShowNotice(false);
+        setReceiptId(null);
 
         try {
             const response = await fetch(
@@ -97,13 +121,16 @@ export default function IncidentForm() {
             );
 
             /**
-             * Expected while our backend is under development.
+             * The API is available, but storage is disabled.
              */
             if (response.status === 501) {
                 setShowNotice(true);
                 return;
             }
 
+            /**
+             * Reject unsuccessful HTTP responses.
+             */
             if (!response.ok) {
                 throw new Error(
                     `Submission failed (HTTP ${response.status})`
@@ -111,13 +138,39 @@ export default function IncidentForm() {
             }
 
             /**
-             * Future: Show a submission confirmation when
-             * the backend stores reports successfully.
-             *
-             * Until that feature is implemented, we don't
-             * claim that anything was saved.
+             * A saved incident must return HTTP 201.
              */
-            setShowNotice(true);
+            if (response.status !== 201) {
+                throw new Error(
+                    `Unexpected API response (HTTP ${response.status})`
+                );
+            }
+
+            const result =
+                (await response.json()) as IncidentReceipt;
+
+            /**
+             * Verify that the API acknowledges an
+             * incident awaiting moderation.
+             */
+            if (
+                result.status !== "received" ||
+                typeof result.id !== "string" ||
+                !result.id ||
+                result.moderation !== "pending"
+            ) {
+                throw new Error(
+                    "Unexpected incident receipt from API."
+                );
+            }
+
+            /**
+             * Submission succeeded.
+             *
+             * Clear the story and display its receipt.
+             */
+            setReceiptId(result.id);
+            setStory("");
         } catch (error) {
             setSubmissionError(
                 error instanceof Error
@@ -125,12 +178,17 @@ export default function IncidentForm() {
                     : "Unable to contact the incident API."
             );
         } finally {
+            /**
+             * Always obtain a fresh verification token.
+             */
+            resetTurnstile();
             setIsSubmitting(false);
         }
     }
 
     return (
         <form onSubmit={handleSubmit} className="mt-6">
+            {/* Incident story label */}
             <label
                 htmlFor="incident-story"
                 className="font-technical block text-xs font-bold text-[#d8ff48]"
@@ -138,6 +196,7 @@ export default function IncidentForm() {
                 DESCRIBE YOUR INCIDENT
             </label>
 
+            {/* Story input */}
             <textarea
                 id="incident-story"
                 name="story"
@@ -146,6 +205,7 @@ export default function IncidentForm() {
                     setStory(event.target.value);
                     setShowNotice(false);
                     setSubmissionError(null);
+                    setReceiptId(null);
                 }}
                 minLength={MIN_LENGTH}
                 maxLength={MAX_LENGTH}
@@ -156,6 +216,7 @@ export default function IncidentForm() {
                 className="mt-3 w-full resize-y border border-white/20 bg-[#1e242c] p-4 text-sm text-white outline-none placeholder:text-gray-400 focus:border-[#d8ff48] focus-visible:ring-2 focus-visible:ring-[#d8ff48]/30"
             />
 
+            {/* Character counter */}
             <div
                 id="incident-help"
                 className="mt-2 flex flex-wrap justify-between gap-2 text-xs text-gray-400"
@@ -167,16 +228,24 @@ export default function IncidentForm() {
             {/* Cloudflare Turnstile verification */}
             <div className="mt-6">
                 <Turnstile
-                    siteKey={process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY!}
+                    ref={turnstileRef}
+                    siteKey={
+                        process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY!
+                    }
                     onSuccess={(token) => {
                         setTurnstileToken(token);
                         setSubmissionError(null);
                     }}
-                    onExpire={() => setTurnstileToken(null)}
-                    onError={() => setTurnstileToken(null)}
+                    onExpire={() => {
+                        setTurnstileToken(null);
+                    }}
+                    onError={() => {
+                        setTurnstileToken(null);
+                    }}
                     options={{
                         theme: "dark",
                         size: "flexible",
+                        action: "submit_incident",
                     }}
                 />
             </div>
@@ -184,7 +253,11 @@ export default function IncidentForm() {
             {/* Submit button */}
             <button
                 type="submit"
-                disabled={!isValid || !turnstileToken || isSubmitting}
+                disabled={
+                    !isValid ||
+                    !turnstileToken ||
+                    isSubmitting
+                }
                 className="mt-6 w-full bg-[#ff633a] px-6 py-4 font-black text-[#101318] transition-colors hover:bg-[#ff805e] focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#d8ff48] disabled:cursor-not-allowed disabled:opacity-40"
             >
                 {isSubmitting
@@ -192,7 +265,33 @@ export default function IncidentForm() {
                     : "FILE INCIDENT REPORT ↗"}
             </button>
 
-            {/* API/network errors */}
+            {/* Successful submission receipt */}
+            {receiptId && (
+                <div
+                    role="status"
+                    aria-live="polite"
+                    className="mt-4 border-l-4 border-[#d8ff48] bg-[#1e242c] p-4"
+                >
+                    <p className="font-technical text-xs font-bold text-[#d8ff48]">
+                        INCIDENT REPORT RECEIVED
+                    </p>
+
+                    <p className="mt-2 text-sm text-gray-300">
+                        Your report has been filed and is awaiting
+                        review. The roboRIO has declined to comment.
+                    </p>
+
+                    <p className="font-technical mt-4 text-xs font-bold text-[#d8ff48]">
+                        STATUS: PENDING MODERATION
+                    </p>
+
+                    <p className="font-technical mt-2 break-all text-xs text-gray-400">
+                        RECEIPT / {receiptId}
+                    </p>
+                </div>
+            )}
+
+            {/* API or network errors */}
             {submissionError && (
                 <div
                     role="alert"
@@ -208,7 +307,7 @@ export default function IncidentForm() {
                 </div>
             )}
 
-            {/* API is online but submissions aren't enabled */}
+            {/* API online, submissions disabled */}
             {showNotice && (
                 <div
                     role="status"
@@ -219,15 +318,18 @@ export default function IncidentForm() {
                     </p>
 
                     <p className="mt-2 text-sm text-gray-300">
-                        The incident report system is still under construction.
-                        Your story has not been submitted or saved.
+                        The incident report system is still under
+                        construction. Your story has not been
+                        submitted or saved.
                     </p>
                 </div>
             )}
 
+            {/* Privacy notice */}
             <p className="mt-4 text-xs leading-relaxed text-gray-400">
-                Anonymous submissions will be reviewed before publication.
-                Please avoid including personal or identifying information.
+                Anonymous submissions will be reviewed before
+                publication. Please avoid including personal or
+                identifying information.
             </p>
         </form>
     );

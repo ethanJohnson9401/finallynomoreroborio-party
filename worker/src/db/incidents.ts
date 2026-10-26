@@ -66,3 +66,52 @@ export async function createIncident(
 	};
 }
 
+
+/**
+ * Incident information visible to moderators.
+ */
+export interface PendingIncident {
+	id: string;
+	story: string;
+	status: "pending";
+	created_at: string;
+}
+
+/**
+ * Retrieve incidents awaiting moderation.
+ *
+ * This query must only be called after moderator
+ * authentication and authorization have succeeded.
+ *
+ * Newest incidents appear first.
+ */
+export async function getPendingIncidents(
+	db: D1Database,
+	limit = 50
+): Promise<PendingIncident[]> {
+	const safeLimit = Math.max(
+		1,
+		Math.min(100, Math.trunc(limit))
+	);
+
+	const result = await db
+		.prepare(
+			`SELECT id, story, status, created_at
+             FROM incidents
+             WHERE status = 'pending'
+             ORDER BY created_at DESC, id DESC
+             LIMIT ?`
+		)
+		.bind(safeLimit)
+		.all<PendingIncident>();
+
+	if (!result.success) {
+		throw new Error(
+			"Failed to retrieve pending incidents"
+		);
+	}
+
+	return result.results;
+}
+
+

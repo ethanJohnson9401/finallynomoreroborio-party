@@ -7,6 +7,9 @@ import {
 	createIncident,
 } from "../src/db/incidents";
 
+/**
+ * Integration tests for Cloudflare D1 operations.
+ */
 describe("Incident database operations", () => {
 	it("creates an incident with pending status", async () => {
 		const story =
@@ -41,7 +44,9 @@ describe("Incident database operations", () => {
 			expect(updatedCount).toBe(initialCount + 1);
 		} finally {
 			await env.DB
-				.prepare("DELETE FROM incidents WHERE id = ?")
+				.prepare(
+					"DELETE FROM incidents WHERE id = ?"
+				)
 				.bind(result.id)
 				.run();
 		}

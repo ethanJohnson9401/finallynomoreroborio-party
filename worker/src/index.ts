@@ -3,41 +3,139 @@
  * finallynomoreroborio.party
  * Cloudflare Worker API
  *
- * Provides incident validation, Turnstile verification,
- * database health checks, and CORS handling.
- *
- * Public submissions are not enabled yet.
+ * Features:
+ * - Health checks
+ * - D1 connectivity
+ * - CORS protection
+ * - Request-size limits
+ * - Incident validation
+ * - Submission configuration security
+ * - Rate limiting
+ * - Turnstile verification
+ * - Moderated incident storage
  */
 
-import { countIncidents } from "./db/incidents";
+import {
+	countIncidents,
+	createIncident,
+	getPendingIncidents,
+} from "./db/incidents";
+
+import { checkIncidentRateLimit } from "./security/rateLimit";
+
+import {
+	checkSubmissionAccess,
+} from "./security/submissionConfig";
+
 import { verifyTurnstile } from "./security/turnstile";
-import { readJsonBody } from "./utils/request";
-import { jsonResponse } from "./utils/response";
 
 import {
 	addCorsHeaders,
 	handleCorsPreflight,
 	isAllowedOrigin,
 } from "./utils/cors";
-import {validateIncident} from "./validation/incident";
 
+import { readJsonBody } from "./utils/request";
+import { jsonResponse } from "./utils/response";
+import { validateIncident } from "./validation/incident";
+
+import {
+	authorizeModerator,
+} from "./security/moderatorAuth";
+
+/**
+ * Cloudflare Worker environment bindings.
+ */
 interface Env {
 	DB: D1Database;
+
+	INCIDENT_LIMITER: RateLimit;
+
+	DEPLOYMENT_ENV?: string;
+	ENABLE_INCIDENT_SUBMISSIONS?: string;
+
 	TURNSTILE_SECRET_KEY: string;
+	TURNSTILE_TEST_MODE?: string;
+
+	MODERATOR_EMAILS?: string;
 }
 
 /**
- * Main Cloudflare Worker entry point.
+ * Main Worker entry point.
  */
 export default {
 	async fetch(
 		request: Request,
-		env: Env
+		env: Env,
+		ctx: ExecutionContext
 	): Promise<Response> {
 		const url = new URL(request.url);
 
+
 		/**
-		 * Handle browser CORS preflight requests.
+		 * Administrator-only incident review API.
+		 *
+		 * Handle this route before the public CORS logic
+		 * and before the normal application routes.
+		 */
+		if (url.pathname === "/api/admin/incidents") {
+			if (request.method !== "GET") {
+				return jsonResponse(
+					{ error: "METHOD_NOT_ALLOWED" },
+					405
+				);
+			}
+
+			/**
+			 * Require verified Cloudflare Access identity
+			 * and membership in our moderator allowlist.
+			 */
+			const authorization = await authorizeModerator(
+				{ access: ctx.access },
+				env
+			);
+
+			if (!authorization.authorized) {
+				const status =
+					authorization.reason === "UNAUTHENTICATED"
+						? 401
+						: 403;
+
+				return jsonResponse(
+					{ error: authorization.reason },
+					status
+				);
+			}
+
+			/**
+			 * Only authenticated moderators reach this code.
+			 */
+			try {
+				const incidents = await getPendingIncidents(
+					env.DB
+				);
+
+				return jsonResponse({
+					status: "ok",
+					incidents,
+					count: incidents.length,
+				});
+			} catch (error) {
+				console.error(
+					"Failed to load moderation queue:",
+					error
+				);
+
+				return jsonResponse(
+					{ error: "MODERATION_QUEUE_UNAVAILABLE" },
+					503
+				);
+			}
+		}
+
+
+		/**
+		 * Handle CORS preflight.
 		 */
 		if (
 			url.pathname === "/api/incidents" &&
@@ -47,10 +145,9 @@ export default {
 		}
 
 		/**
-		 * Reject browser requests from unapproved origins.
+		 * Reject unapproved browser origins.
 		 *
-		 * Requests without an Origin header are still
-		 * permitted for local CLI testing.
+		 * CORS is not authentication.
 		 */
 		if (
 			url.pathname === "/api/incidents" &&
@@ -66,20 +163,17 @@ export default {
 			}
 		}
 
-		/**
-		 * Execute the requested API route.
-		 */
-		const response = await handleRequest(request, env);
+		const response = await handleRequest(
+			request,
+			env
+		);
 
-		/**
-		 * Attach CORS response headers where allowed.
-		 */
 		return addCorsHeaders(request, response);
 	},
 };
 
 /**
- * Application API routes.
+ * Application routes.
  */
 async function handleRequest(
 	request: Request,
@@ -89,8 +183,6 @@ async function handleRequest(
 
 	/**
 	 * GET /api/health
-	 *
-	 * Check whether the Worker is running.
 	 */
 	if (url.pathname === "/api/health") {
 		if (request.method !== "GET") {
@@ -108,8 +200,6 @@ async function handleRequest(
 
 	/**
 	 * GET /api/health/db
-	 *
-	 * Verify D1 connectivity and count incidents.
 	 */
 	if (url.pathname === "/api/health/db") {
 		if (request.method !== "GET") {
@@ -147,9 +237,6 @@ async function handleRequest(
 
 	/**
 	 * POST /api/incidents
-	 *
-	 * Validate incident reports and verify Turnstile.
-	 * Reports are NOT stored yet.
 	 */
 	if (url.pathname === "/api/incidents") {
 		if (request.method !== "POST") {
@@ -160,7 +247,7 @@ async function handleRequest(
 		}
 
 		/**
-		 * Require JSON requests.
+		 * Require application/json.
 		 */
 		const contentType =
 			request.headers.get("content-type") ?? "";
@@ -177,7 +264,7 @@ async function handleRequest(
 		}
 
 		/**
-		 * Read JSON with an 8 KB request-size limit.
+		 * Read JSON with the existing 8 KB limit.
 		 */
 		const parsed = await readJsonBody(request);
 
@@ -191,7 +278,7 @@ async function handleRequest(
 		const body = parsed.body;
 
 		/**
-		 * Validate the incident story.
+		 * Validate the submitted story.
 		 */
 		const validation = validateIncident(body);
 
@@ -222,11 +309,56 @@ async function handleRequest(
 		}
 
 		/**
-		 * Verify the token with Cloudflare.
+		 * Check deployment configuration BEFORE
+		 * using rate limiting or Turnstile.
+		 *
+		 * Unsafe configuration cannot reach D1 writes.
+		 */
+		const access = checkSubmissionAccess(env);
+
+		if (!access.allowed) {
+			return jsonResponse(
+				{ error: access.reason },
+				503
+			);
+		}
+
+		/**
+		 * Apply Cloudflare rate limiting.
+		 */
+		let withinLimit: boolean;
+
+		try {
+			withinLimit = await checkIncidentRateLimit(
+				env.INCIDENT_LIMITER,
+				request
+			);
+		} catch (error) {
+			console.error(
+				"Incident rate limiter failed:",
+				error
+			);
+
+			return jsonResponse(
+				{ error: "RATE_LIMIT_UNAVAILABLE" },
+				503
+			);
+		}
+
+		if (!withinLimit) {
+			return jsonResponse(
+				{ error: "RATE_LIMITED" },
+				429
+			);
+		}
+
+		/**
+		 * Verify Turnstile using the permitted mode.
 		 */
 		const verified = await verifyTurnstile(
 			turnstileToken,
-			env.TURNSTILE_SECRET_KEY
+			env.TURNSTILE_SECRET_KEY,
+			access.testMode
 		);
 
 		if (!verified) {
@@ -237,29 +369,39 @@ async function handleRequest(
 		}
 
 		/**
-		 * Validation and Turnstile verification passed.
-		 *
-		 * Future submission pipeline:
-		 * 1. Verify the expected Turnstile hostname/action.
-		 * 2. Implement rate limiting and abuse controls.
-		 * 3. Generate a unique incident ID.
-		 * 4. Insert the report into D1 as pending.
-		 * 5. Return a submission confirmation.
-		 *
-		 * Public submissions are intentionally disabled.
+		 * Store the incident as pending moderation.
 		 */
-		return jsonResponse(
-			{
-				status: "not_implemented",
-				message:
-					"Submission storage is not enabled yet.",
-			},
-			501
-		);
+		try {
+			const incident = await createIncident(
+				env.DB,
+				validation.story
+			);
+
+			return jsonResponse(
+				{
+					status: "received",
+					id: incident.id,
+					moderation: incident.status,
+					message:
+						"Incident report received for review.",
+				},
+				201
+			);
+		} catch (error) {
+			console.error(
+				"Incident creation failed:",
+				error
+			);
+
+			return jsonResponse(
+				{ error: "INCIDENT_STORAGE_FAILED" },
+				503
+			);
+		}
 	}
 
 	/**
-	 * Unknown API endpoint.
+	 * Unknown endpoint.
 	 */
 	return jsonResponse(
 		{ error: "NOT_FOUND" },
