@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import type { FormEvent } from "react";
 import {
     Turnstile,
@@ -40,9 +40,16 @@ interface IncidentReceipt {
     message: string;
 }
 
+interface ApiError {
+    error?: string;
+}
+
 export default function IncidentForm() {
     const [story, setStory] = useState("");
-    const [placeholder, setPlaceholder] = useState(PLACEHOLDERS[0]);
+
+    // Keep the initial render deterministic to avoid
+    // React hydration mismatches and effect-based state updates.
+    const placeholder = PLACEHOLDERS[0];
 
     const [turnstileToken, setTurnstileToken] =
         useState<string | null>(null);
@@ -50,27 +57,20 @@ export default function IncidentForm() {
     const turnstileRef = useRef<TurnstileInstance | null>(null);
 
     const [isSubmitting, setIsSubmitting] = useState(false);
+
     const [submissionError, setSubmissionError] =
         useState<string | null>(null);
 
     const [showNotice, setShowNotice] = useState(false);
-    const [receiptId, setReceiptId] = useState<string | null>(null);
 
-    /**
-     * Choose a random placeholder when the component mounts.
-     */
-    useEffect(() => {
-        const randomIndex = Math.floor(
-            Math.random() * PLACEHOLDERS.length
-        );
-
-        setPlaceholder(PLACEHOLDERS[randomIndex]);
-    }, []);
+    const [receiptId, setReceiptId] =
+        useState<string | null>(null);
 
     /**
      * Validate the incident report.
      */
     const trimmedStory = story.trim();
+
     const charactersRemaining = MAX_LENGTH - story.length;
 
     const isValid =
@@ -78,10 +78,9 @@ export default function IncidentForm() {
         trimmedStory.length <= MAX_LENGTH;
 
     /**
-     * Reset the Turnstile widget and its stored token.
+     * Reset Turnstile after a submission attempt.
      *
-     * Tokens are single-use and should be refreshed after
-     * every submission attempt.
+     * Turnstile verification tokens are single-use.
      */
     function resetTurnstile() {
         setTurnstileToken(null);
@@ -89,7 +88,7 @@ export default function IncidentForm() {
     }
 
     /**
-     * Submit the incident to our Cloudflare Worker.
+     * Submit the incident to the Cloudflare Worker API.
      */
     async function handleSubmit(
         event: FormEvent<HTMLFormElement>
@@ -121,11 +120,24 @@ export default function IncidentForm() {
             );
 
             /**
-             * The API is available, but storage is disabled.
+             * Production submissions are intentionally disabled.
+             *
+             * The API returns:
+             * HTTP 503
+             * { "error": "SUBMISSIONS_DISABLED" }
+             *
+             * Other HTTP 503 errors must remain failures.
              */
-            if (response.status === 501) {
-                setShowNotice(true);
-                return;
+            if (response.status === 503) {
+                const result: ApiError | null =
+                    await response.json().catch(() => null);
+
+                if (
+                    result?.error === "SUBMISSIONS_DISABLED"
+                ) {
+                    setShowNotice(true);
+                    return;
+                }
             }
 
             /**
@@ -138,7 +150,7 @@ export default function IncidentForm() {
             }
 
             /**
-             * A saved incident must return HTTP 201.
+             * A successful submission must return HTTP 201.
              */
             if (response.status !== 201) {
                 throw new Error(
@@ -150,8 +162,7 @@ export default function IncidentForm() {
                 (await response.json()) as IncidentReceipt;
 
             /**
-             * Verify that the API acknowledges an
-             * incident awaiting moderation.
+             * Validate the incident receipt.
              */
             if (
                 result.status !== "received" ||
@@ -165,9 +176,7 @@ export default function IncidentForm() {
             }
 
             /**
-             * Submission succeeded.
-             *
-             * Clear the story and display its receipt.
+             * Store the receipt and clear the report.
              */
             setReceiptId(result.id);
             setStory("");
@@ -178,9 +187,6 @@ export default function IncidentForm() {
                     : "Unable to contact the incident API."
             );
         } finally {
-            /**
-             * Always obtain a fresh verification token.
-             */
             resetTurnstile();
             setIsSubmitting(false);
         }
@@ -307,7 +313,7 @@ export default function IncidentForm() {
                 </div>
             )}
 
-            {/* API online, submissions disabled */}
+            {/* Submissions temporarily disabled */}
             {showNotice && (
                 <div
                     role="status"
@@ -318,9 +324,11 @@ export default function IncidentForm() {
                     </p>
 
                     <p className="mt-2 text-sm text-gray-300">
-                        The incident report system is still under
-                        construction. Your story has not been
-                        submitted or saved.
+                        The roboRIO Trauma Center is currently
+                        accepting visitors, but incident filing
+                        is temporarily closed. Your report has
+                        not been saved. Check back when the
+                        paperwork department reopens.
                     </p>
                 </div>
             )}
