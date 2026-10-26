@@ -71,7 +71,7 @@
 
 			"vars": {
 				"DEPLOYMENT_ENV": "production",
-				"ENABLE_INCIDENT_SUBMISSIONS": "false",
+				"ENABLE_INCIDENT_SUBMISSIONS": "true",
 				"TURNSTILE_TEST_MODE": "false"
 			},
 
