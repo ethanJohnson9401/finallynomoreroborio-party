@@ -52,7 +52,7 @@ export default function RetirementArtwork() {
                 className="relative h-64 w-full motion-reduce:!transform-none motion-reduce:!opacity-100 lg:h-[360px]"
             >
                 <Image
-                    src="/images/roborio-retirement-hero.png"
+                    src="/images/roborio-retirement-hero.webp"
                     alt="A roboRIO controller being carted away into retirement"
                     fill
                     sizes="(max-width: 1023px) 100vw, 40vw"
