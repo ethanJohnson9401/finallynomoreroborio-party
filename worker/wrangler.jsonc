@@ -1,11 +1,11 @@
 
 /**
  * finallynomoreroborio.party
- * Cloudflare Worker configuration
+ * Public Cloudflare Worker API
  *
  * Default environment: local development
- * Production environment: explicitly configured,
- * with incident submissions disabled.
+ * Production environment: public API with
+ * incident submissions disabled by default.
  */
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
@@ -23,9 +23,9 @@
 	"upload_source_maps": true,
 
 	/**
-	 * Default environment configuration.
+	 * Default development environment.
 	 *
-	 * Local secrets are loaded from .dev.vars.
+	 * Secrets are loaded from .dev.vars.
 	 */
 	"d1_databases": [
 		{
@@ -50,12 +50,24 @@
 	/**
 	 * Production environment.
 	 *
-	 * Does not enable submissions until we
-	 * explicitly change this configuration.
+	 * Publicly accessible on:
+	 * https://api.finallynomoreroborio.party
+	 *
+	 * Submissions remain disabled until
+	 * explicitly enabled after verification.
 	 */
 	"env": {
 		"production": {
 			"name": "roborio-trauma-api-production",
+
+			"workers_dev": false,
+
+			"routes": [
+				{
+					"pattern": "api.finallynomoreroborio.party",
+					"custom_domain": true
+				}
+			],
 
 			"vars": {
 				"DEPLOYMENT_ENV": "production",

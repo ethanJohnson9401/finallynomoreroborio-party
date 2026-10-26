@@ -44,3 +44,38 @@ next-env.d.ts
 .idea/
 
 **/.dev.vars
+
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Cloudflare local state
+.wrangler/
+**/.wrangler/
+
+# Next.js generated output
+.next/
+**/.next/
+out/
+**/out/
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+!.env.*.example
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+
+# Local databases
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.sqlite3
+*.db
+*.db-shm
+*.db-wal
+
+# Logs
+*.log

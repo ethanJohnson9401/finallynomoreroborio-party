@@ -1,54 +1,22 @@
 
-/**
- * finallynomoreroborio.party
- * Private Trauma Center Admin Worker
- *
- * Default environment:
- * - Local development
- * - Admin API enabled
- *
- * Production environment:
- * - Admin API disabled
- * - No public workers.dev endpoint
- *
- * All moderation routes require authenticated
- * Cloudflare Access identity and moderator approval.
- */
-
 {
   "$schema": "node_modules/wrangler/config-schema.json",
 
   "name": "roborio-trauma-admin-api",
-
   "main": "src/index.ts",
-
   "compatibility_date": "2026-10-19",
 
-  /**
-   * Disable the public workers.dev URL when deployed.
-   *
-   * This is not a substitute for authentication.
-   */
   "workers_dev": false,
 
   "observability": {
     "enabled": true
   },
 
-  /**
-   * Default configuration used by local development.
-   *
-   * Do not deploy this default environment.
-   */
   "vars": {
-    "ADMIN_API_ENABLED": "true"
+    "ADMIN_API_ENABLED": "true",
+    "ADMIN_QUEUE_ENABLED": "true"
   },
 
-  /**
-   * Incident database.
-   *
-   * Wrangler dev uses local D1 storage by default.
-   */
   "d1_databases": [
     {
       "binding": "DB",
@@ -58,21 +26,22 @@
     }
   ],
 
-  /**
-   * Production configuration.
-   *
-   * Administrative operations remain disabled
-   * until Cloudflare Access is connected and
-   * independently verified.
-   */
   "env": {
     "production": {
       "name": "roborio-trauma-admin-api-production",
 
       "workers_dev": false,
 
+      "routes": [
+        {
+          "pattern": "admin-api.finallynomoreroborio.party",
+          "custom_domain": true
+        }
+      ],
+
       "vars": {
-        "ADMIN_API_ENABLED": "false"
+        "ADMIN_API_ENABLED": "false",
+        "ADMIN_QUEUE_ENABLED": "true"
       },
 
       "d1_databases": [
