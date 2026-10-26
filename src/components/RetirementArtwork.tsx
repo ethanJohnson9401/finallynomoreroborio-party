@@ -32,7 +32,7 @@ export default function RetirementArtwork() {
                 initial={{
                     x: 180,
                     rotate: 12,
-                    opacity: 0,
+                    opacity: 1,
                 }}
                 animate={{
                     x: 0,
