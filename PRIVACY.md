@@ -57,17 +57,25 @@ submissions open.
 
 No automated deletion schedule is currently promised.
 
+
 ## Removal requests
 
-Visitors may request removal of published incident
-content by contacting the project maintainer through
-the project's established private contact channel.
+To request removal of a published incident, email
+privacy@finallynomoreroborio.party.
 
-Include the incident receipt identifier or enough
-information to locate the published report.
+Include the incident receipt ID, if available, or
+enough information to identify the report.
 
-Requests will be reviewed to determine the appropriate
-action.
+Do not include passwords, credentials, or additional
+sensitive personal information.
+
+Project maintainers review removal requests and may
+withdraw an approved incident from public publication.
+
+Withdrawal removes an incident from public display
+but does not automatically erase it from the database,
+moderation records, or existing backups.
+
 
 ## Backups
 

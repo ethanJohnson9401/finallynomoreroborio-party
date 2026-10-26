@@ -9,6 +9,8 @@ import {
     type TurnstileInstance,
 } from "@marsidev/react-turnstile";
 
+import Link from "next/link";
+
 const MIN_LENGTH = 20;
 const MAX_LENGTH = 1000;
 
@@ -592,9 +594,16 @@ export default function IncidentForm() {
             )}
 
             <p className="mt-4 text-xs leading-relaxed text-gray-400">
-                Anonymous submissions will be reviewed
-                before publication. Please avoid including
-                personal or identifying information.
+                Anonymous submissions are reviewed before publication.
+                Do not include personal or identifying information.
+                Read our{" "}
+                <Link
+                    href="/privacy"
+                    className="font-semibold text-[#d8ff48] underline underline-offset-4 hover:text-white"
+                >
+                    Privacy & Content Policy
+                </Link>
+                {" "}before submitting.
             </p>
         </form>
     );
