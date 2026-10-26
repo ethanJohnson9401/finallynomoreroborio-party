@@ -389,6 +389,10 @@ export default function IncidentForm() {
             onSubmit={handleSubmit}
             className="mt-6"
         >
+            <p className="font-technical mb-6 text-sm font-bold text-lime-400">
+                YOUR INCIDENT REPORT
+            </p>
+
             <div className="font-technical mb-6 flex flex-wrap items-center gap-3 text-xs font-bold tracking-wider">
                 <span className="text-[#d8ff48]">
                     ● INTAKE OPEN

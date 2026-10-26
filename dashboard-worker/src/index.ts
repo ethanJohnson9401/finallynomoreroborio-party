@@ -13,7 +13,7 @@ interface Env {
     ASSETS: Fetcher;
 }
 
-export default {
+const dashboardWorker = {
     async fetch(
         request: Request,
         env: Env
@@ -92,3 +92,5 @@ export default {
         });
     },
 };
+
+export default dashboardWorker;

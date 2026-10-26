@@ -34,8 +34,6 @@ export function launchCelebration() {
         disableForReducedMotion: true,
     });
 
-    let animationFrameId = 0;
-
     function frame() {
         if (performance.now() >= end) {
             celebrationRunning = false;
@@ -65,8 +63,8 @@ export function launchCelebration() {
             disableForReducedMotion: true,
         });
 
-        animationFrameId = requestAnimationFrame(frame);
+        requestAnimationFrame(frame);
     }
 
-    animationFrameId = requestAnimationFrame(frame);
+    requestAnimationFrame(frame);
 }
